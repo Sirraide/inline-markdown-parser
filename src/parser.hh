@@ -20,7 +20,8 @@ struct Parser {
         enum struct Kind {
             Bold,
             Italic,
-            Unterline,
+            Underline,
+            Strikethrough
         };
 
         std::list<Node> nodes;
@@ -74,9 +75,10 @@ struct fmt::formatter<Parser::Emph::Kind> : formatter<std::string_view> {
     template <typename FormatContext>
     auto format(Parser::Emph::Kind k, FormatContext& ctx) {
         using enum Parser::Emph::Kind;
-        std::string_view sv = k == Italic ? "em"
-                            : k == Bold   ? "strong"
-                                          : "uline";
+        std::string_view sv = k == Italic    ? "em"
+                            : k == Bold      ? "strong"
+                            : k == Underline ? "uline"
+                                             : "del";
         return formatter<std::string_view>::format(sv, ctx);
     }
 };
@@ -147,9 +149,11 @@ inline bool Parser::ClassifyDelimiter(u32 start_of_text, Span text) {
     // 1. `*`/`**`
     //   1a. can open (strong) emphasis iff it is part of a left-flanking delimiter run, and
     //   1b. can close (strong) emphasis iff it is part of a right-flanking delimiter run.
+    //
+    // EXTENSION: `~~` behaves like `**`.
     bool can_open;
     bool can_close;
-    if (kind == '*') {
+    if (kind == '*' or kind == '~') {
         can_open = left_flanking;
         can_close = right_flanking;
     }
@@ -232,7 +236,9 @@ inline void Parser::Parse() {
         //
         //    (2) a sequence of one or more `_` characters that is not preceded or
         //        followed by a non-backslash-escaped `_` character.
-        usz start = input.find_first_of("*_`", pos);
+        //
+        // EXTENSION: `~~` is also a delimiter.
+        usz start = input.find_first_of("*_~`", pos);
         if (start == std::string::npos) {
             nodes.emplace_back(Span{start_of_text, input.size()});
             return;
@@ -295,6 +301,12 @@ inline void Parser::Parse() {
             // We handled the code span, either by skipping it and treating it as literal
             // or by inserting a code span node. In either case, there is no more delimiter
             // processing to be done here.
+            continue;
+        }
+
+        // EXTENSION: A single `~` is not a delimiter.
+        if (input[start] == '~' and count == 1) {
+            pos = start + 1;
             continue;
         }
 
@@ -391,7 +403,8 @@ inline void Parser::ProcessEmphasis() {
             auto kind = [&] {
                 switch (opener->kind(this)) {
                     case '*': return strong ? Emph::Kind::Bold : Emph::Kind::Italic;
-                    case '_': return strong ? Emph::Kind::Unterline : Emph::Kind::Italic;
+                    case '_': return strong ? Emph::Kind::Underline : Emph::Kind::Italic;
+                    case '~': return Emph::Kind::Strikethrough; // Always strong.
                     default: die("unreachable");
                 }
             }();
