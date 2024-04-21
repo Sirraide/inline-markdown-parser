@@ -17,8 +17,14 @@ struct Parser {
     using NodeRef = std::list<Node>::iterator;
 
     struct Emph {
+        enum struct Kind {
+            Bold,
+            Italic,
+            Unterline,
+        };
+
         std::list<Node> nodes;
-        bool strong = false;
+        Kind kind;
     };
 
     struct Span {
@@ -63,6 +69,18 @@ struct Parser {
     auto Print() -> std::string;
 };
 
+template <>
+struct fmt::formatter<Parser::Emph::Kind> : formatter<std::string_view> {
+    template <typename FormatContext>
+    auto format(Parser::Emph::Kind k, FormatContext& ctx) {
+        using enum Parser::Emph::Kind;
+        std::string_view sv = k == Italic ? "em"
+                            : k == Bold   ? "strong"
+                                          : "uline";
+        return formatter<std::string_view>::format(sv, ctx);
+    }
+};
+
 inline Parser::Parser(std::string_view text) {
     input = text;
     delimiter_stack.emplace_back(); // Bottom of stack.
@@ -105,13 +123,13 @@ inline bool Parser::ClassifyDelimiter(u32 start_of_text, Span text) {
     // for left-flanking delimiters. It can be used to compute the right-flanking
     // property by swapping the ‘next’ and ‘prev’ parameters.
     const auto IsFlankingDelimiter = [&](char prev, char next) {
-        if (next == 0) return false;          // 1.
-        if (std::isspace(next)) return false; // 2.
-        if (not std::ispunct(next)) return true;  // 3.
-        if (prev == 0) return true;           // 4.
-        if (std::isspace(prev)) return true;  // 5.
-        if (std::ispunct(prev)) return true;  // 6.
-        return false;                         // 7.
+        if (next == 0) return false;             // 1.
+        if (std::isspace(next)) return false;    // 2.
+        if (not std::ispunct(next)) return true; // 3.
+        if (prev == 0) return true;              // 4.
+        if (std::isspace(prev)) return true;     // 5.
+        if (std::ispunct(prev)) return true;     // 6.
+        return false;                            // 7.
     };
 
     const char next = text.end < input.size() ? input[text.end] : 0;
@@ -185,7 +203,7 @@ inline void Parser::DumpNodes() {
         }
 
         void operator()(Emph& e) {
-            fmt::print("{}Emph {}:\n", std::string(indent, ' '), e.strong ? "strong" : "em");
+            fmt::print("{}Emph {}:\n", std::string(indent, ' '), e.kind);
             indent++;
             for (auto& n : e.nodes) std::visit(*this, n);
             indent--;
@@ -367,12 +385,21 @@ inline void Parser::ProcessEmphasis() {
         if (found) {
             // Figure out whether we have emphasis or strong emphasis: if both closer and
             // opener spans have length >= 2, we have strong, otherwise regular.
+            //
+            // EXTENSION: Two __ are underlining instead of strong emphasis.
             bool strong = opener->count() >= 2 and current_position->count() >= 2;
+            auto kind = [&] {
+                switch (opener->kind(this)) {
+                    case '*': return strong ? Emph::Kind::Bold : Emph::Kind::Italic;
+                    case '_': return strong ? Emph::Kind::Unterline : Emph::Kind::Italic;
+                    default: die("unreachable");
+                }
+            }();
 
             // Insert an emph or strong emph node accordingly, after the text node
             // corresponding to the opener and remove any delimiters between the
             // opener and closer from the delimiter stack.
-            auto emph_node = nodes.insert(std::next(opener->node), Emph{{}, strong});
+            auto emph_node = nodes.insert(std::next(opener->node), Emph{{}, kind});
             auto& emph = std::get<Emph>(*emph_node);
             emph.nodes.splice(emph.nodes.begin(), nodes, std::next(emph_node), current_position->node);
             delimiter_stack.erase(std::next(opener), current_position);
@@ -476,9 +503,9 @@ inline auto Parser::Print() -> std::string {
         }
 
         void operator()(const Emph& e) {
-            s += fmt::format("<{}>", e.strong ? "strong" : "em");
+            s += fmt::format("<{}>", e.kind);
             for (auto& n : e.nodes) std::visit(*this, n);
-            s += fmt::format("</{}>", e.strong ? "strong" : "em");
+            s += fmt::format("</{}>", e.kind);
         }
     };
 

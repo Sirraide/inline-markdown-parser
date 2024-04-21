@@ -10,7 +10,11 @@ auto P(std::string_view input) -> std::string {
 
 #define T(input, expected) CHECK(P(input) == expected)
 
-TEST_CASE("2.4") {
+TEST_CASE("Empty string doesn’t crash") {
+    T("", "");
+}
+
+TEST_CASE("2.4 Backslash escapes") {
     T(
         "\\!\\\"\\#\\$\\%\\&\\'\\(\\)\\*\\+\\,\\-\\.\\/\\:\\;\\<\\=\\>\\?\\@\\[\\\\\\]\\^\\_\\`\\{\\|\\}\\~",
         "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
@@ -19,7 +23,7 @@ TEST_CASE("2.4") {
     T("\\→\\A\\a\\ \\3\\φ\\«", "\\→\\A\\a\\ \\3\\φ\\«");
 }
 
-TEST_CASE("6.2") {
+TEST_CASE("6.2 Code spans") {
     T("`foo`", "<code>foo</code>");
     T("`` foo ` bar ``", "<code>foo ` bar</code>");
     T("` `` `", "<code>``</code>");
@@ -36,6 +40,10 @@ TEST_CASE("6.2") {
     T("```foo``", "```foo``");
     T("`foo", "`foo");
     T("`foo``bar``", "`foo<code>bar</code>");
+
+    SECTION("No stripping of spaces if the code span only consists of spaces") {
+        T("`    `", "<code>    </code>");
+    }
 }
 
 TEST_CASE("6.2 Rule 1") {
@@ -84,15 +92,15 @@ TEST_CASE("6.2 Rule 5") {
 }
 
 TEST_CASE("6.2 Rule 6") {
-    T("__foo bar__", "<strong>foo bar</strong>");
+    T("__foo bar__", "<uline>foo bar</uline>");
     T("__ foo bar__", "__ foo bar__");
     T("__\nfoo bar__", "__\nfoo bar__");
     T("a__\"foo\"__", "a__\"foo\"__");
     T("foo__bar__", "foo__bar__");
     T("5__6__78", "5__6__78");
     T("пристаням__стремятся__", "пристаням__стремятся__");
-    T("__foo, __bar__, baz__", "<strong>foo, <strong>bar</strong>, baz</strong>");
-    T("foo-__(bar)__", "foo-<strong>(bar)</strong>");
+    T("__foo, __bar__, baz__", "<uline>foo, <uline>bar</uline>, baz</uline>");
+    T("foo-__(bar)__", "foo-<uline>(bar)</uline>");
 }
 
 TEST_CASE("6.2 Rule 7") {
@@ -110,16 +118,16 @@ TEST_CASE("6.2 Rule 7") {
 TEST_CASE("6.2 Rule 8") {
     T("__foo bar __", "__foo bar __");
     T("__(__foo)", "__(__foo)");
-    T("_(__foo__)_", "<em>(<strong>foo</strong>)</em>");
+    T("_(__foo__)_", "<em>(<uline>foo</uline>)</em>");
     T("__foo__bar", "__foo__bar");
     T("__пристаням__стремятся", "__пристаням__стремятся");
-    T("__foo__bar__baz__", "<strong>foo__bar__baz</strong>");
-    T("__(bar)__.", "<strong>(bar)</strong>.");
+    T("__foo__bar__baz__", "<uline>foo__bar__baz</uline>");
+    T("__(bar)__.", "<uline>(bar)</uline>.");
 }
 
 TEST_CASE("6.2 Rule 9") {
     T("*foo\nbar*", "<em>foo\nbar</em>");
-    T("_foo __bar__ baz_", "<em>foo <strong>bar</strong> baz</em>");
+    T("_foo __bar__ baz_", "<em>foo <uline>bar</uline> baz</em>");
     T("_foo _bar_ baz_", "<em>foo <em>bar</em> baz</em>");
     T("__foo_ bar_", "<em><em>foo</em> bar</em>");
     T("*foo *bar**", "<em>foo <em>bar</em></em>");
@@ -138,9 +146,9 @@ TEST_CASE("6.2 Rule 9") {
 
 TEST_CASE("6.2 Rule 10") {
     T("**foo\nbar**", "<strong>foo\nbar</strong>");
-    T("__foo _bar_ baz__", "<strong>foo <em>bar</em> baz</strong>");
-    T("__foo __bar__ baz__", "<strong>foo <strong>bar</strong> baz</strong>");
-    T("____foo__ bar__", "<strong><strong>foo</strong> bar</strong>");
+    T("__foo _bar_ baz__", "<uline>foo <em>bar</em> baz</uline>");
+    T("__foo __bar__ baz__", "<uline>foo <uline>bar</uline> baz</uline>");
+    T("____foo__ bar__", "<uline><uline>foo</uline> bar</uline>");
     T("**foo **bar****", "<strong>foo <strong>bar</strong></strong>");
     T("**foo *bar* baz**", "<strong>foo <em>bar</em> baz</strong>");
     T("**foo*bar*baz**", "<strong>foo<em>bar</em>baz</strong>");
@@ -172,34 +180,34 @@ TEST_CASE("6.2 Rule 12") {
     T("foo _\\__", "foo <em>_</em>");
     T("foo _*_", "foo <em>*</em>");
     T("foo _____", "foo _____");
-    T("foo __\\___", "foo <strong>_</strong>");
-    T("foo __*__", "foo <strong>*</strong>");
+    T("foo __\\___", "foo <uline>_</uline>");
+    T("foo __*__", "foo <uline>*</uline>");
     T("__foo_", "_<em>foo</em>");
     T("_foo__", "<em>foo</em>_");
-    T("___foo__", "_<strong>foo</strong>");
+    T("___foo__", "_<uline>foo</uline>");
     T("____foo_", "___<em>foo</em>");
-    T("__foo___", "<strong>foo</strong>_");
+    T("__foo___", "<uline>foo</uline>_");
     T("_foo____", "<em>foo</em>___");
 }
 
 TEST_CASE("6.2 Rule 13") {
     T("**foo**", "<strong>foo</strong>");
     T("*_foo_*", "<em><em>foo</em></em>");
-    T("__foo__", "<strong>foo</strong>");
+    T("__foo__", "<uline>foo</uline>");
     T("_*foo*_", "<em><em>foo</em></em>");
     T("****foo****", "<strong><strong>foo</strong></strong>");
-    T("____foo____", "<strong><strong>foo</strong></strong>");
+    T("____foo____", "<uline><uline>foo</uline></uline>");
     T("******foo******", "<strong><strong><strong>foo</strong></strong></strong>");
 }
 
 TEST_CASE("6.2 Rule 14") {
     T("***foo***", "<em><strong>foo</strong></em>");
-    T("_____foo_____", "<em><strong><strong>foo</strong></strong></em>");
+    T("_____foo_____", "<em><uline><uline>foo</uline></uline></em>");
 }
 
 TEST_CASE("6.2 Rule 15") {
     T("*foo _bar* baz_", "<em>foo _bar</em> baz_");
-    T("*foo __bar *baz bim__ bam*", "<em>foo <strong>bar *baz bim</strong> bam</em>");
+    T("*foo __bar *baz bim__ bam*", "<em>foo <uline>bar *baz bim</uline> bam</em>");
 }
 
 TEST_CASE("6.2 Rule 16") {
