@@ -1,0 +1,13 @@
+## IDE and editor files.
+.idea/
+.vscode/
+.cache/
+
+## Build files.
+/out/
+/md-inline-parser
+/md-inline-parser.exe
+/tests
+
+## Valgrind.
+callgrind.out.*
