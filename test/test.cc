@@ -19,6 +19,25 @@ TEST_CASE("2.4") {
     T("\\→\\A\\a\\ \\3\\φ\\«", "\\→\\A\\a\\ \\3\\φ\\«");
 }
 
+TEST_CASE("6.2") {
+    T("`foo`", "<code>foo</code>");
+    T("`` foo ` bar ``", "<code>foo ` bar</code>");
+    T("` `` `", "<code>``</code>");
+    T("` a`", "<code> a</code>");
+    T("`\tb\t`", "<code>\tb\t</code>");
+    T("` `\n`  `", "<code> </code>\n<code>  </code>");
+    T("``\nfoo\nbar  \nbaz\n``", "<code>foo bar   baz</code>");
+    T("``\nfoo \n``", "<code>foo </code>");
+    T("`foo   bar \nbaz`", "<code>foo   bar  baz</code>");
+    T("`foo\\`bar`", "<code>foo\\</code>bar`");
+    T("``foo`bar``", "<code>foo`bar</code>");
+    T("` foo `` bar `", "<code>foo `` bar</code>");
+    T("*foo`*`", "*foo<code>*</code>");
+    T("```foo``", "```foo``");
+    T("`foo", "`foo");
+    T("`foo``bar``", "`foo<code>bar</code>");
+}
+
 TEST_CASE("6.2 Rule 1") {
     T("*foo bar*", "<em>foo bar</em>");
     T("a * foo bar*", "a * foo bar*");

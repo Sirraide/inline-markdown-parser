@@ -24,11 +24,13 @@ struct Parser {
     struct Span {
         u32 start{};
         u32 end{};
+        bool is_code = false;
 
         Span() = default;
-        Span(usz start, usz end) : start{u32(start)}, end{u32(end)} {}
+        Span(usz start, usz end, bool code = false)
+            : start{u32(start)}, end{u32(end)}, is_code{code} {}
 
-        u32 size() { return end - start; }
+        u32 size() const { return end - start; }
     };
 
     struct Delimiter {
@@ -198,6 +200,11 @@ inline void Parser::Parse() {
     usz pos = 0;
     usz start_of_text = pos;
     while (pos < input.size()) {
+        // 6.1 Code spans
+        //
+        // A backtick string is a string of one or more backtick characters
+        // (`) that is neither preceded nor followed by a backtick.
+        //
         // 6.2 Emphasis and strong emphasis
         //
         // A delimiter run is either
@@ -207,7 +214,7 @@ inline void Parser::Parse() {
         //
         //    (2) a sequence of one or more `_` characters that is not preceded or
         //        followed by a non-backslash-escaped `_` character.
-        usz start = input.find_first_of("*_", pos);
+        usz start = input.find_first_of("*_`", pos);
         if (start == std::string::npos) {
             nodes.emplace_back(Span{start_of_text, input.size()});
             return;
@@ -228,6 +235,50 @@ inline void Parser::Parse() {
         usz count = 1;
         while (start + count < input.size() and input[start + count] == input[start])
             ++count;
+
+        // Handle backticks first; unlike emphasis, they are very straight-forward;
+        // simply read ahead until we find a corresponding number of backticks (note
+        // that backslash-escapes are not allowed in code spans, so we don’t even
+        // have to worry about that).
+        if (input[start] == '`') {
+            auto search_start = start + count;
+            for (;;) {
+                auto end = input.find({input.data() + start, count}, search_start);
+
+                // If we don’t find a matching backtick string, then these backticks are
+                // literal; stop searching.
+                if (end == std::string::npos) {
+                    // Only skip past the initial backticks.
+                    pos = start + count;
+                    break;
+                }
+
+                // On the other hand, if there are extra backticks here, then this is a
+                // longer backtick string, which doesn’t match the one we’re looking for.
+                //
+                // This handles the case of e.g.: ‘` `` `’, which is ‘<code>``</code>’.
+                if (end + count < input.size() and input[end + count] == '`') {
+                    // As an optimisation, just skip past all backticks here since we
+                    // know that this backtick string isn’t the end anyway.
+                    usz c = count;
+                    do c++;
+                    while (end + c < input.size() and input[end + c] == '`');
+                    search_start = end + c;
+                    continue;
+                }
+
+                // Otherwise, we’ve found the end of a code span.
+                nodes.emplace_back(Span{start_of_text, start});
+                nodes.emplace_back(Span{start + count, end, true});
+                pos = start_of_text = end + count;
+                break;
+            }
+
+            // We handled the code span, either by skipping it and treating it as literal
+            // or by inserting a code span node. In either case, there is no more delimiter
+            // processing to be done here.
+            continue;
+        }
 
         // Create the delimiter.
         if (ClassifyDelimiter(start_of_text, Span{start, start + count}))
@@ -367,8 +418,36 @@ inline auto Parser::Print() -> std::string {
     struct Printer {
         Parser* p;
         std::string s{};
-        void operator()(Span sp) {
-            // Process escapes.
+        void operator()(const Span& sp) {
+            // Apply normalisation to code spans.
+            if (sp.is_code) {
+                // First, line endings are converted to spaces.
+                auto normalised = std::string{p->input.substr(sp.start, sp.size())};
+                for (auto& c : normalised)
+                    if (c == '\n')
+                        c = ' ';
+
+                // If the resulting string both begins and ends with a space character,
+                // but does not consist entirely of space characters, a single space
+                // character is removed from the front and back. This allows you to include
+                // code that begins or ends with backtick characters, which must be separated
+                // by whitespace from the opening or closing backtick strings.
+                if (
+                    normalised.size() > 2 and
+                    normalised.front() == ' ' and
+                    normalised.back() == ' ' and
+                    normalised.find_first_not_of(' ') != std::string::npos
+                ) {
+                    normalised.erase(normalised.begin());
+                    normalised.pop_back();
+                }
+
+                // That’s all for code spans.
+                s += fmt::format("<code>{}</code>", normalised);
+                return;
+            }
+
+            // Regular text; process escapes.
             static constexpr std::string_view escapable = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
             std::string_view text = p->input.substr(sp.start, sp.size());
             usz pos = 0;
@@ -396,7 +475,7 @@ inline auto Parser::Print() -> std::string {
             }
         }
 
-        void operator()(Emph& e) {
+        void operator()(const Emph& e) {
             s += fmt::format("<{}>", e.strong ? "strong" : "em");
             for (auto& n : e.nodes) std::visit(*this, n);
             s += fmt::format("</{}>", e.strong ? "strong" : "em");
