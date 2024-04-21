@@ -40,6 +40,7 @@ struct Parser {
         bool preceded_by_punct : 1 = false;
         bool followed_by_punct : 1 = false;
 
+        bool clopen() { return can_open and can_close; }
         u32 count() { return std::get<Span>(*node).size(); }
         char kind(Parser* p) { return p->input[std::get<Span>(*node).start]; }
         void remove(u32 count) { std::get<Span>(*node).start += count; }
@@ -53,6 +54,7 @@ struct Parser {
 
     Parser(std::string_view text);
     bool ClassifyDelimiter(u32 start_of_text, Span text);
+    void DumpNodes();
     bool IsUnicodeWhitespace(char c);
     void Parse();
     void ProcessEmphasis();
@@ -63,6 +65,7 @@ inline Parser::Parser(std::string_view text) {
     input = text;
     delimiter_stack.emplace_back(); // Bottom of stack.
     Parse();
+    DumpNodes();
     ProcessEmphasis();
 }
 
@@ -171,6 +174,26 @@ inline bool Parser::ClassifyDelimiter(u32 start_of_text, Span text) {
     return true;
 }
 
+inline void Parser::DumpNodes() {
+    struct Printer {
+        Parser* p;
+        usz indent = 0;
+        void operator()(Span sp) {
+            fmt::print("{}Span: '{}'\n", std::string(indent, ' '), p->input.substr(sp.start, sp.size()));
+        }
+
+        void operator()(Emph& e) {
+            fmt::print("{}Emph {}:\n", std::string(indent, ' '), e.strong ? "strong" : "em");
+            indent++;
+            for (auto& n : e.nodes) std::visit(*this, n);
+            indent--;
+        }
+    };
+
+    Printer p{this};
+    for (auto& n : nodes) std::visit(p, n);
+}
+
 inline void Parser::Parse() {
     usz pos = 0;
     usz start_of_text = pos;
@@ -215,7 +238,8 @@ inline void Parser::Parse() {
     }
 
     // Append remaining text.
-    nodes.emplace_back(Span{start_of_text, input.size()});
+    if (start_of_text < input.size())
+        nodes.emplace_back(Span{start_of_text, input.size()});
 }
 
 inline void Parser::ProcessEmphasis() {
@@ -234,16 +258,17 @@ inline void Parser::ProcessEmphasis() {
     class Openers {
         using Iterator = std::list<Delimiter>::iterator;
         Parser& p;
-        Iterator star;
-        Iterator underscore;
+        std::array<Iterator, 3> star;
+        std::array<Iterator, 3> underscore;
 
     public:
         Openers(Parser& p) : p{p} {
-            star = underscore = p.delimiter_stack.begin();
+            star.fill(p.delimiter_stack.begin());
+            underscore.fill(p.delimiter_stack.begin());
         }
 
         auto operator[](Delimiter& d) -> Iterator& {
-            return d.kind(&p) == '*' ? star : underscore;
+            return d.kind(&p) == '*' ? star[d.count() % 3] : underscore[d.count() % 3];
         }
     } openers{*this};
 
@@ -269,11 +294,21 @@ inline void Parser::ProcessEmphasis() {
         auto opener = std::prev(current_position);
         bool found = false;
         while (opener != delimiter_stack.begin() and opener != openers[*current_position]) {
-            if (opener->kind(this) == current_position->kind(this)) {
-                found = true;
-                break;
-            }
+            // 6.2 Emphasis and strong emphasis Rule 9/10
+            //
+            // If one of the delimiters can both open and close emphasis, then the sum of the
+            // lengths of the delimiter runs containing the opening and closing delimiters must
+            // not be a multiple of 3 unless both lengths are multiples of 3.
+            found = [&] {
+                if (opener->kind(this) != current_position->kind(this)) return false;
+                if (not opener->clopen() and not current_position->clopen()) return true;
+                auto l1 = opener->count();
+                auto l2 = current_position->count();
+                if (l1 % 3 == 0 and l2 % 3 == 0) return true;
+                return (l1 + l2) % 3 != 0;
+            }();
 
+            if (found) break;
             --opener;
         }
 
@@ -332,7 +367,35 @@ inline auto Parser::Print() -> std::string {
     struct Printer {
         Parser* p;
         std::string s{};
-        void operator()(Span sp) { s += p->input.substr(sp.start, sp.size()); }
+        void operator()(Span sp) {
+            // Process escapes.
+            static constexpr std::string_view escapable = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
+            std::string_view text = p->input.substr(sp.start, sp.size());
+            usz pos = 0;
+            usz start_of_text = 0;
+            for (;;) {
+                auto backslash = text.find('\\', pos);
+                if (backslash == std::string::npos or backslash == text.size() - 1) {
+                    s += text.substr(start_of_text);
+                    return;
+                }
+
+                // 2.4 Backslash escapes
+                //
+                // Any ASCII punctuation character may be backslash-escaped:
+                // Backslashes before other characters are treated as literal backslashes
+                char escaped = text[backslash + 1];
+                if (escapable.find(escaped) != std::string::npos) {
+                    s += text.substr(start_of_text, backslash - start_of_text);
+                    s += escaped;
+                    start_of_text = backslash + 2;
+                }
+
+                // Skip the backslash.
+                pos = backslash + 2;
+            }
+        }
+
         void operator()(Emph& e) {
             s += fmt::format("<{}>", e.strong ? "strong" : "em");
             for (auto& n : e.nodes) std::visit(*this, n);
