@@ -216,6 +216,7 @@ TEST_CASE("6.2 Rule 16") {
 }
 
 TEST_CASE("Strikethrough extension") {
+    T("~~", "~~");
     T("~~t~~", "<del>t</del>");
     T("~~t~~t~~", "<del>t</del>t~~");
     T("~t~~", "~t~~");
@@ -225,4 +226,17 @@ TEST_CASE("Strikethrough extension") {
     T("**foo ~~bar~~ baz**", "<strong>foo <del>bar</del> baz</strong>");
     T("~~foo\nbar~~", "<del>foo\nbar</del>");
     T("~~t~\\~e\\~~v~~", "<del>t~~e~~v</del>");
+}
+
+TEST_CASE("Spoiler extension") {
+    T("||", "||");
+    T("||t||", "<spoiler>t</spoiler>");
+    T("||t||t||", "<spoiler>t</spoiler>t||");
+    T("|t||", "|t||");
+    T("||t|", "||t|");
+    T("||t", "||t");
+    T("|||| t", "|||| t");
+    T("**foo ||bar|| baz**", "<strong>foo <spoiler>bar</spoiler> baz</strong>");
+    T("||foo\nbar||", "<spoiler>foo\nbar</spoiler>");
+    T("||t|\\|e\\||v||", "<spoiler>t||e||v</spoiler>");
 }

@@ -21,7 +21,8 @@ struct Parser {
             Bold,
             Italic,
             Underline,
-            Strikethrough
+            Strikethrough,
+            Spoiler,
         };
 
         std::list<Node> nodes;
@@ -75,10 +76,11 @@ struct fmt::formatter<Parser::Emph::Kind> : formatter<std::string_view> {
     template <typename FormatContext>
     auto format(Parser::Emph::Kind k, FormatContext& ctx) {
         using enum Parser::Emph::Kind;
-        std::string_view sv = k == Italic    ? "em"
-                            : k == Bold      ? "strong"
-                            : k == Underline ? "uline"
-                                             : "del";
+        std::string_view sv = k == Italic        ? "em"
+                            : k == Bold          ? "strong"
+                            : k == Underline     ? "uline"
+                            : k == Strikethrough ? "del"
+                                                 : "spoiler";
         return formatter<std::string_view>::format(sv, ctx);
     }
 };
@@ -150,10 +152,10 @@ inline bool Parser::ClassifyDelimiter(u32 start_of_text, Span text) {
     //   1a. can open (strong) emphasis iff it is part of a left-flanking delimiter run, and
     //   1b. can close (strong) emphasis iff it is part of a right-flanking delimiter run.
     //
-    // EXTENSION: `~~` behaves like `**`.
+    // EXTENSION: `~~`/`||` behaves like `**`.
     bool can_open;
     bool can_close;
-    if (kind == '*' or kind == '~') {
+    if (kind == '*' or kind == '~' or kind == '|') {
         can_open = left_flanking;
         can_close = right_flanking;
     }
@@ -237,8 +239,8 @@ inline void Parser::Parse() {
         //    (2) a sequence of one or more `_` characters that is not preceded or
         //        followed by a non-backslash-escaped `_` character.
         //
-        // EXTENSION: `~~` is also a delimiter.
-        usz start = input.find_first_of("*_~`", pos);
+        // EXTENSION: `~~`/`||` are also a delimiters.
+        usz start = input.find_first_of("*_~|`", pos);
         if (start == std::string::npos) {
             nodes.emplace_back(Span{start_of_text, input.size()});
             return;
@@ -304,8 +306,8 @@ inline void Parser::Parse() {
             continue;
         }
 
-        // EXTENSION: A single `~` is not a delimiter.
-        if (input[start] == '~' and count == 1) {
+        // EXTENSION: A single `~`/`/` is not a delimiter.
+        if ((input[start] == '~' or input[start] == '|') and count == 1) {
             pos = start + 1;
             continue;
         }
@@ -341,15 +343,25 @@ inline void Parser::ProcessEmphasis() {
         Parser& p;
         std::array<Iterator, 3> star;
         std::array<Iterator, 3> underscore;
+        std::array<Iterator, 3> tilde;
+        std::array<Iterator, 3> pipe;
 
     public:
         Openers(Parser& p) : p{p} {
             star.fill(p.delimiter_stack.begin());
             underscore.fill(p.delimiter_stack.begin());
+            tilde.fill(p.delimiter_stack.begin());
+            pipe.fill(p.delimiter_stack.begin());
         }
 
         auto operator[](Delimiter& d) -> Iterator& {
-            return d.kind(&p) == '*' ? star[d.count() % 3] : underscore[d.count() % 3];
+            switch (d.kind(&p)) {
+                case '*': return star[d.count() % 3];
+                case '_': return underscore[d.count() % 3];
+                case '~': return tilde[d.count() % 3];
+                case '|': return pipe[d.count() % 3];
+                default: die("unreachable");
+            }
         }
     } openers{*this};
 
@@ -405,6 +417,7 @@ inline void Parser::ProcessEmphasis() {
                     case '*': return strong ? Emph::Kind::Bold : Emph::Kind::Italic;
                     case '_': return strong ? Emph::Kind::Underline : Emph::Kind::Italic;
                     case '~': return Emph::Kind::Strikethrough; // Always strong.
+                    case '|': return Emph::Kind::Spoiler; // Always strong.
                     default: die("unreachable");
                 }
             }();
